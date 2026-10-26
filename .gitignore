@@ -1,0 +1,39 @@
+# Local Python environments and caches
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local business databases and SQLite sidecar files
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Business inputs and generated documents (keep templates versioned)
+/profiles/
+/generated/
+/test_*.docx
+
+# Machine-specific settings and credentials
+.claude/settings.local.json
+.env
+.env.*
+!.env.example
+
+# Local logs, temporary files, and offline installation media
+*.log
+*.tmp
+*.bak
+/wheelhouse/
+/.prepare-venv/
+
+# OS metadata and Office lock files
+.DS_Store
+Thumbs.db
+~$*

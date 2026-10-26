@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ConfigM — 配置管理记录系统</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px; background: #f5f7fa; color: #333; }
+    header { background: #1a3a5c; color: #fff; padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+    header h1 { font-size: 18px; font-weight: 600; }
+    header select { background: #2a5080; color: #fff; border: 1px solid #4a8abf; border-radius: 4px; padding: 4px 8px; font-size: 14px; cursor: pointer; }
+    header button.new-proj { margin-left: auto; background: #3a8abf; color: #fff; border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer; }
+    nav { background: #fff; border-bottom: 1px solid #ddd; display: flex; gap: 0; padding: 0 24px; }
+    nav button { padding: 10px 20px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; }
+    nav button.active { color: #1a3a5c; border-bottom-color: #1a3a5c; font-weight: 600; }
+    main { padding: 20px 24px; }
+    .card { background: #fff; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 16px; margin-bottom: 16px; }
+    .card h2 { font-size: 15px; margin-bottom: 12px; color: #1a3a5c; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 13px; }
+    th { background: #f0f4f8; font-weight: 600; }
+    .btn { padding: 5px 12px; border-radius: 4px; border: none; cursor: pointer; font-size: 13px; }
+    .btn-primary { background: #1a3a5c; color: #fff; }
+    .btn-danger  { background: #c0392b; color: #fff; }
+    .btn-sm      { padding: 3px 9px; font-size: 12px; }
+    .btn-success { background: #27ae60; color: #fff; }
+    .flex { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .form-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .form-row label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+    .form-row input, .form-row select, .form-row textarea {
+      border: 1px solid #ccc; border-radius: 4px; padding: 5px 8px; font-size: 13px; min-width: 160px;
+    }
+    .tag { display: inline-block; background: #e8f4fd; color: #1a6aa5; border-radius: 3px; padding: 2px 7px; font-size: 12px; margin: 1px; }
+    .stale { color: #e67e22; font-size: 12px; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .modal { background: #fff; border-radius: 8px; padding: 24px; min-width: 360px; max-width: 600px; width: 90%; max-height: 85vh; overflow-y: auto; }
+    .modal h3 { margin-bottom: 16px; font-size: 16px; }
+    .modal-footer { margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px; }
+    .empty { color: #aaa; text-align: center; padding: 24px; }
+  </style>
+</head>
+<body x-data="app()" x-init="init()">
+
+<header>
+  <h1>ConfigM</h1>
+  <select x-model="currentProjectId" @change="onProjectChange()">
+    <option value="">— 选择项目 —</option>
+    <template x-for="p in projects" :key="p.id">
+      <option :value="p.id" x-text="p.name + ' (' + p.code + ')'"></option>
+    </template>
+  </select>
+  <button class="new-proj btn" @click="openProjectModal(null)">+ 新建项目</button>
+  <button class="btn" x-show="currentProjectId" @click="openProjectModal(projects.find(p=>String(p.id)===String(currentProjectId)))">编辑项目</button>
+  <input type="file" id="importFile" accept=".xlsx" style="display:none" @change="onImportFile($event)" />
+  <button class="btn btn-success" @click="$el.previousElementSibling.click()">导入 Excel</button>
+  <button class="btn" x-show="currentProjectId" @click="exportExcel()">导出 Excel</button>
+</header>
+
+<nav>
+  <button :class="{active: tab==='phases'}"     @click="tab='phases'">阶段管理</button>
+  <button :class="{active: tab==='activities'}" @click="tab='activities'">活动记录</button>
+  <button :class="{active: tab==='products'}"   @click="tab='products'">配置项管理</button>
+  <button :class="{active: tab==='baselines'}"  @click="tab='baselines'">基线管理</button>
+  <button :class="{active: tab==='documents'}"  @click="tab='documents'">生成文档</button>
+</nav>
+
+<main>
+  <!-- 无项目提示 -->
+  <div x-show="!currentProjectId" class="empty">请先在顶部选择或新建一个项目</div>
+
+  <!-- ── Tab: 阶段管理 ── -->
+  <div x-show="currentProjectId && tab==='phases'">
+    <div class="card">
+      <div class="flex" style="margin-bottom:12px">
+        <h2 style="margin:0">项目阶段</h2>
+        <button class="btn btn-primary btn-sm" @click="openPhaseModal(null)">+ 新建阶段</button>
+      </div>
+      <table>
+        <thead><tr><th>阶段名称</th><th>开始日期</th><th>结束日期</th><th>操作</th></tr></thead>
+        <tbody>
+          <template x-for="ph in phases" :key="ph.id">
+            <tr>
+              <td x-text="ph.name"></td>
+              <td x-text="ph.start_date||'—'"></td>
+              <td x-text="ph.end_date||'—'"></td>
+              <td class="flex">
+                <button class="btn btn-sm" @click="openPhaseModal(ph)">编辑</button>
+                <button class="btn btn-danger btn-sm" @click="deletePhase(ph.id)">删除</button>
+              </td>
+            </tr>
+          </template>
+          <tr x-show="!phases.length"><td colspan="4" class="empty">暂无阶段</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Tab: 活动记录 ── -->
+  <div x-show="currentProjectId && tab==='activities'">
+    <div class="card">
+      <div class="flex" style="margin-bottom:12px">
+        <h2 style="margin:0">活动记录</h2>
+        <select x-model="selectedPhaseId" @change="loadActivities()">
+          <option value="">— 选择阶段 —</option>
+          <template x-for="ph in phases" :key="ph.id">
+            <option :value="ph.id" x-text="ph.name"></option>
+          </template>
+        </select>
+        <button class="btn btn-primary btn-sm" x-show="selectedPhaseId" @click="openActivityModal(null)">+ 新建活动</button>
+      </div>
+      <table>
+        <thead><tr><th>日期</th><th>活动类型</th><th>关联产品</th><th>预分配编号</th><th>操作</th></tr></thead>
+        <tbody>
+          <template x-for="a in activities" :key="a.id">
+            <tr>
+              <td x-text="a.activity_date"></td>
+              <td x-text="a.activity_type_name"></td>
+              <td>
+                <template x-for="pid in a.product_ids" :key="pid">
+                  <span class="tag" x-text="productName(pid)"></span>
+                </template>
+              </td>
+              <td>
+                <template x-for="pn in a.preassigned_numbers" :key="pn.doc_number">
+                  <div style="font-size:12px" x-text="pn.doc_number"></div>
+                </template>
+              </td>
+              <td class="flex">
+                <button class="btn btn-sm" @click="openActivityModal(a)">编辑</button>
+                <button class="btn btn-danger btn-sm" @click="deleteActivity(a.id)">删除</button>
+              </td>
+            </tr>
+          </template>
+          <tr x-show="!activities.length"><td colspan="5" class="empty">暂无活动</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Tab: 产品管理 ── -->
+  <div x-show="currentProjectId && tab==='products'">
+    <div class="card">
+      <div class="flex" style="margin-bottom:12px">
+        <h2 style="margin:0">产品列表</h2>
+        <button class="btn btn-primary btn-sm" @click="openProductModal(null)">+ 新建产品</button>
+      </div>
+      <table>
+        <thead><tr><th>产品名称</th><th>标识</th><th>版本</th><th>前向版本</th><th>类型</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>
+          <template x-for="p in products" :key="p.id">
+            <tr>
+              <td x-text="p.name"></td>
+              <td x-text="p.code"></td>
+              <td x-text="p.version"></td>
+              <td x-text="p.previous_version||'—'"></td>
+              <td x-text="p.product_type"></td>
+              <td x-text="p.status"></td>
+              <td class="flex">
+                <button class="btn btn-sm" @click="openProductModal(p)">编辑</button>
+                <button class="btn btn-danger btn-sm" @click="deleteProduct(p.id)">删除</button>
+              </td>
+            </tr>
+          </template>
+          <tr x-show="!products.length"><td colspan="7" class="empty">暂无产品</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Tab: 基线管理 ── -->
+  <div x-show="currentProjectId && tab==='baselines'">
+    <div class="card">
+      <div class="flex" style="margin-bottom:12px">
+        <h2 style="margin:0">基线列表</h2>
+        <button class="btn btn-primary btn-sm" @click="openBaselineModal(null)">+ 新建基线</button>
+      </div>
+      <table>
+        <thead><tr><th>基线名称</th><th>标识</th><th>版本</th><th>发布日期</th><th>状态</th><th>包含配置项</th><th>操作</th></tr></thead>
+        <tbody>
+          <template x-for="bl in baselines" :key="bl.id">
+            <tr>
+              <td x-text="bl.name"></td>
+              <td x-text="bl.code"></td>
+              <td x-text="bl.version"></td>
+              <td x-text="bl.release_date||'—'"></td>
+              <td x-text="bl.status"></td>
+              <td>
+                <template x-for="bp in bl.products" :key="bp.id">
+                  <span class="tag" x-text="bp.name + ' ' + bp.version"></span>
+                </template>
+              </td>
+              <td class="flex">
+                <button class="btn btn-sm" @click="openBaselineModal(bl)">编辑</button>
+                <button class="btn btn-danger btn-sm" @click="deleteBaseline(bl.id)">删除</button>
+              </td>
+            </tr>
+          </template>
+          <tr x-show="!baselines.length"><td colspan="7" class="empty">暂无基线</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Tab: 生成文档 ── -->
+  <div x-show="currentProjectId && tab==='documents'">
+    <div class="card">
+      <div class="flex" style="margin-bottom:12px">
+        <h2 style="margin:0">文档记录</h2>
+        <button class="btn btn-success btn-sm" @click="generateAll()">一键生成全部</button>
+        <button class="btn btn-sm btn-primary" @click="downloadAll()">批量下载</button>
+        <button class="btn btn-sm" @click="loadDocuments()">刷新</button>
+      </div>
+      <table>
+        <thead><tr><th>文档编号</th><th>类型</th><th>序号</th><th>生成时间</th><th>操作</th></tr></thead>
+        <tbody>
+          <template x-for="dr in documents" :key="dr.id">
+            <tr>
+              <td x-text="dr.doc_number"></td>
+              <td x-text="dr.doc_type"></td>
+              <td x-text="dr.sequence"></td>
+              <td>
+                <span x-show="dr.generated_at" x-text="dr.generated_at"></span>
+                <span x-show="!dr.generated_at" style="color:#aaa">未生成</span>
+                <span class="stale" x-show="dr.is_stale">（已过期）</span>
+              </td>
+              <td class="flex">
+                <button class="btn btn-primary btn-sm" @click="generateOne(dr.id)">生成</button>
+                <button class="btn btn-sm" x-show="dr.generated_at" @click="downloadDoc(dr.id)">下载</button>
+              </td>
+            </tr>
+          </template>
+          <tr x-show="!documents.length"><td colspan="5" class="empty">暂无文档记录，请先录入活动</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<!-- ── 项目 Modal ── -->
+<div class="modal-overlay" x-show="modal==='project'" @click.self="modal=''">
+  <div class="modal">
+    <h3 x-text="form.id ? '编辑项目' : '新建项目'"></h3>
+    <div class="form-row">
+      <label>项目名称 <input x-model="form.name" placeholder="必填" /></label>
+      <label>项目代号 <input x-model="form.code" placeholder="纯数字，如 2021163" /></label>
+      <label>项目版本 <input x-model="form.version" placeholder="如 0.0" style="min-width:80px" /></label>
+    </div>
+    <div class="form-row">
+      <label>项目组长 <input x-model="form.leader" placeholder="必填" /></label>
+      <label>配置管理员 <input x-model="form.cm_manager" placeholder="必填" /></label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" @click="modal=''">取消</button>
+      <button class="btn btn-primary" @click="saveProject()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 阶段 Modal ── -->
+<div class="modal-overlay" x-show="modal==='phase'" @click.self="modal=''">
+  <div class="modal">
+    <h3 x-text="form.id ? '编辑阶段' : '新建阶段'"></h3>
+    <div class="form-row">
+      <label>阶段名称 <input x-model="form.name" placeholder="如：需求阶段" /></label>
+    </div>
+    <div class="form-row">
+      <label>开始日期 <input type="date" x-model="form.start_date" /></label>
+      <label>结束日期 <input type="date" x-model="form.end_date" /></label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" @click="modal=''">取消</button>
+      <button class="btn btn-primary" @click="savePhase()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 活动 Modal ── -->
+<div class="modal-overlay" x-show="modal==='activity'" @click.self="modal=''">
+  <div class="modal">
+    <h3 x-text="form.id ? '编辑活动' : '新建活动'"></h3>
+    <div class="form-row">
+      <label>活动类型
+        <select x-model="form.activity_type_id">
+          <template x-for="at in activityTypes" :key="at.id">
+            <option :value="at.id" x-text="at.name"></option>
+          </template>
+        </select>
+      </label>
+      <label>活动日期 <input type="date" x-model="form.activity_date" /></label>
+    </div>
+    <div class="form-row" x-show="activityTypeName(form.activity_type_id)==='产品入库'">
+      <label>入库事由
+        <select x-model="form.checkin_reason">
+          <option>入受控库</option><option>基线发布</option><option>基线变更</option><option>入产品库</option>
+        </select>
+      </label>
+      <label>关联基线
+        <select x-model="form.baseline_id">
+          <option value="">— 无 —</option>
+          <template x-for="bl in baselines" :key="bl.id">
+            <option :value="bl.id" x-text="bl.name + ' ' + bl.version"></option>
+          </template>
+        </select>
+      </label>
+    </div>
+    <div class="form-row" x-show="activityTypeName(form.activity_type_id)==='发布基线'">
+      <label>关联基线（发布对象）
+        <select x-model="form.baseline_id">
+          <option value="">— 选择基线 —</option>
+          <template x-for="bl in baselines" :key="bl.id">
+            <option :value="bl.id" x-text="bl.name + ' ' + bl.version"></option>
+          </template>
+        </select>
+      </label>
+    </div>
+    <div class="form-row" x-show="activityTypeName(form.activity_type_id)==='产品出库'">
+      <label style="width:100%">出库原因 <textarea x-model="form.checkout_reason" rows="2" style="width:100%"></textarea></label>
+    </div>
+    <div class="form-row">
+      <label style="width:100%">备注 <textarea x-model="form.notes" rows="2" style="width:100%"></textarea></label>
+    </div>
+    <div style="margin-bottom:10px">
+      <div style="font-size:13px;margin-bottom:6px">关联产品（多选）</div>
+      <div class="flex" style="flex-wrap:wrap">
+        <template x-for="p in products" :key="p.id">
+          <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+            <input type="checkbox" :value="p.id" x-model="form.product_ids" />
+            <span x-text="p.name + ' ' + p.version"></span>
+          </label>
+        </template>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" @click="modal=''">取消</button>
+      <button class="btn btn-primary" @click="saveActivity()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 产品 Modal ── -->
+<div class="modal-overlay" x-show="modal==='product'" @click.self="modal=''">
+  <div class="modal">
+    <h3 x-text="form.id ? '编辑产品' : '新建产品'"></h3>
+    <div class="form-row">
+      <label>产品名称 <input x-model="form.name" /></label>
+      <label>产品标识 <input x-model="form.code" /></label>
+    </div>
+    <div class="form-row">
+      <label>当前版本 <input x-model="form.version" /></label>
+      <label>前向版本 <input x-model="form.previous_version" placeholder="首次入库留空" /></label>
+    </div>
+    <div class="form-row">
+      <label>产品类型
+        <select x-model="form.product_type">
+          <option>文档</option><option>代码</option><option>其他</option>
+        </select>
+      </label>
+      <label>状态
+        <select x-model="form.status">
+          <option>有效</option><option>无效</option>
+        </select>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" @click="modal=''">取消</button>
+      <button class="btn btn-primary" @click="saveProduct()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 基线 Modal ── -->
+<div class="modal-overlay" x-show="modal==='baseline'" @click.self="modal=''">
+  <div class="modal">
+    <h3 x-text="form.id ? '编辑基线' : '新建基线'"></h3>
+    <div class="form-row">
+      <label>基线名称 <input x-model="form.name" /></label>
+      <label>标识代码 <input x-model="form.code" placeholder="如 BL-FP" /></label>
+    </div>
+    <div class="form-row">
+      <label>版本 <input x-model="form.version" /></label>
+      <label>前向版本 <input x-model="form.previous_version" placeholder="可选" /></label>
+    </div>
+    <div class="form-row">
+      <label>发布日期 <input type="date" x-model="form.release_date" /></label>
+      <label>状态
+        <select x-model="form.status">
+          <option>有效</option><option>无效</option>
+        </select>
+      </label>
+    </div>
+    <div style="margin-bottom:10px">
+      <div style="font-size:13px;margin-bottom:6px">包含产品（多选）</div>
+      <div class="flex" style="flex-wrap:wrap">
+        <template x-for="p in products" :key="p.id">
+          <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+            <input type="checkbox" :value="p.id" x-model="form.product_ids" />
+            <span x-text="p.name + ' ' + p.version"></span>
+          </label>
+        </template>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" @click="modal=''">取消</button>
+      <button class="btn btn-primary" @click="saveBaseline()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 导入确认 Modal ── -->
+<div class="modal-overlay" x-show="modal==='import'" @click.self="modal=''">
+  <div class="modal" style="max-width:700px">
+    <h3>导入确认</h3>
+    <p style="margin-bottom:12px;color:#555;font-size:13px">
+      解析完成：<strong x-text="importSummary"></strong>。请为以下活动补充信息后确认导入（将清空现有数据）。
+    </p>
+
+    <template x-if="importCheckin.length">
+      <div>
+        <h4 style="margin-bottom:8px;font-size:14px">入库活动 — 选择入库原因</h4>
+        <table style="margin-bottom:16px">
+          <thead><tr><th>阶段</th><th>活动</th><th>日期</th><th>配置项</th><th>入库原因</th></tr></thead>
+          <tbody>
+            <template x-for="item in importCheckin" :key="item.key">
+              <tr>
+                <td x-text="item.phase_name"></td>
+                <td x-text="item.task_name"></td>
+                <td x-text="item.activity_date"></td>
+                <td x-text="item.product_names.join('，')"></td>
+                <td>
+                  <select x-model="importReasons.checkin[item.key]" style="min-width:100px">
+                    <option>入受控库</option>
+                    <option>基线发布</option>
+                    <option>基线变更</option>
+                    <option>入产品库</option>
+                  </select>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
+    <template x-if="importCheckout.length">
+      <div>
+        <h4 style="margin-bottom:8px;font-size:14px">出库活动 — 填写出库原因</h4>
+        <table style="margin-bottom:16px">
+          <thead><tr><th>阶段</th><th>活动</th><th>日期</th><th>配置项</th><th>出库原因</th></tr></thead>
+          <tbody>
+            <template x-for="item in importCheckout" :key="item.key">
+              <tr>
+                <td x-text="item.phase_name"></td>
+                <td x-text="item.task_name"></td>
+                <td x-text="item.activity_date"></td>
+                <td x-text="item.product_names.join('，')"></td>
+                <td><input x-model="importReasons.checkout[item.key]" placeholder="请填写出库原因" style="min-width:140px" /></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
+    <template x-if="importBaseline.length">
+      <div>
+        <h4 style="margin-bottom:8px;font-size:14px">发布基线活动 — 选择关联基线</h4>
+        <table style="margin-bottom:16px">
+          <thead><tr><th>阶段</th><th>活动</th><th>日期</th><th>关联基线</th></tr></thead>
+          <tbody>
+            <template x-for="item in importBaseline" :key="item.key">
+              <tr>
+                <td x-text="item.phase_name"></td>
+                <td x-text="item.task_name"></td>
+                <td x-text="item.activity_date"></td>
+                <td>
+                  <select x-model="importBaselineSelections[item.key]" style="min-width:120px">
+                    <option value="">— 不关联 —</option>
+                    <template x-for="name in importBaselineNames" :key="name">
+                      <option :value="name" x-text="name"></option>
+                    </template>
+                  </select>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
+    <div class="modal-footer">
+      <button class="btn" @click="modal=''">取消</button>
+      <button class="btn btn-danger" @click="confirmImport()">确认导入（清空现有数据）</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function app() {
+  return {
+    tab: 'phases',
+    modal: '',
+    form: {},
+    importSummary: '',
+    importCheckin: [],
+    importCheckout: [],
+    importBaseline: [],
+    importBaselineNames: [],
+    importReasons: { checkin: {}, checkout: {} },
+    importBaselineSelections: {},
+    projects: [],
+    currentProjectId: '',
+    phases: [],
+    activities: [],
+    products: [],
+    baselines: [],
+    documents: [],
+    activityTypes: [],
+    selectedPhaseId: '',
+
+    async init() {
+      await this.loadProjects();
+      await this.loadActivityTypes();
+    },
+
+    async api(method, url, body) {
+      const opts = { method, headers: { 'Content-Type': 'application/json' } };
+      if (body) opts.body = JSON.stringify(body);
+      const r = await fetch(url, opts);
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert(err.detail || `请求失败: ${r.status}`);
+        throw new Error(r.status);
+      }
+      return r.status === 204 ? null : r.json();
+    },
+
+    async loadProjects() { this.projects = await this.api('GET', '/api/projects'); },
+    async loadActivityTypes() {
+      const r = await fetch('/api/activity-types');
+      if (r.ok) this.activityTypes = await r.json();
+    },
+
+    async onProjectChange() {
+      if (!this.currentProjectId) return;
+      await Promise.all([this.loadPhases(), this.loadProducts(), this.loadBaselines()]);
+      this.activities = [];
+      this.documents = [];
+      this.selectedPhaseId = '';
+    },
+
+    async loadPhases() {
+      this.phases = await this.api('GET', `/api/projects/${this.currentProjectId}/phases`);
+    },
+    async loadActivities() {
+      if (!this.selectedPhaseId) return;
+      this.activities = await this.api('GET', `/api/phases/${this.selectedPhaseId}/activities`);
+    },
+    async loadProducts() {
+      this.products = await this.api('GET', `/api/projects/${this.currentProjectId}/products`);
+    },
+    async loadBaselines() {
+      this.baselines = await this.api('GET', `/api/projects/${this.currentProjectId}/baselines`);
+    },
+    async loadDocuments() {
+      this.documents = await this.api('GET', `/api/projects/${this.currentProjectId}/documents`);
+    },
+
+    productName(id) {
+      const p = this.products.find(x => x.id === id);
+      return p ? `${p.name} ${p.version}` : id;
+    },
+    activityTypeName(id) {
+      const at = this.activityTypes.find(x => x.id == id);
+      return at ? at.name : '';
+    },
+
+    // ── 项目 ──
+    openProjectModal(proj) {
+      this.form = proj ? { ...proj } : { name:'', code:'', version:'0.0', leader:'', cm_manager:'' };
+      this.modal = 'project';
+    },
+    async saveProject() {
+      if (this.form.id) {
+        await this.api('PUT', `/api/projects/${this.form.id}`, this.form);
+      } else {
+        const p = await this.api('POST', '/api/projects', this.form);
+        this.currentProjectId = String(p.id);
+        await this.onProjectChange();
+      }
+      await this.loadProjects();
+      this.modal = '';
+    },
+
+    // ── 阶段 ──
+    openPhaseModal(ph) {
+      this.form = ph ? { ...ph } : { name:'', start_date:'', end_date:'' };
+      this.modal = 'phase';
+    },
+    async savePhase() {
+      if (this.form.id) {
+        await this.api('PUT', `/api/phases/${this.form.id}`, this.form);
+      } else {
+        await this.api('POST', `/api/projects/${this.currentProjectId}/phases`, this.form);
+      }
+      await this.loadPhases();
+      this.modal = '';
+    },
+    async deletePhase(id) {
+      if (!confirm('确定删除此阶段？其下所有活动将一并删除。')) return;
+      await this.api('DELETE', `/api/phases/${id}`);
+      await this.loadPhases();
+    },
+
+    // ── 活动 ──
+    openActivityModal(act) {
+      this.form = act
+        ? { ...act, product_ids: [...act.product_ids], baseline_id: act.baseline_id || '' }
+        : { activity_type_id: this.activityTypes[0]?.id, activity_date:'', notes:'',
+            checkin_reason:'入受控库', baseline_id:'', checkout_reason:'', product_ids:[] };
+      this.modal = 'activity';
+    },
+    async saveActivity() {
+      const payload = {
+        activity_type_id: Number(this.form.activity_type_id),
+        activity_date: this.form.activity_date,
+        notes: this.form.notes || null,
+        checkin_reason: this.form.checkin_reason || null,
+        baseline_id: this.form.baseline_id ? Number(this.form.baseline_id) : null,
+        checkout_reason: this.form.checkout_reason || null,
+        product_ids: this.form.product_ids.map(Number),
+      };
+      if (this.form.id) {
+        await this.api('PUT', `/api/activities/${this.form.id}`, payload);
+      } else {
+        await this.api('POST', `/api/phases/${this.selectedPhaseId}/activities`, payload);
+      }
+      await this.loadActivities();
+      this.modal = '';
+    },
+    async deleteActivity(id) {
+      if (!confirm('确定删除此活动？')) return;
+      await this.api('DELETE', `/api/activities/${id}`);
+      await this.loadActivities();
+    },
+
+    // ── 产品 ──
+    openProductModal(p) {
+      this.form = p ? { ...p } : { name:'', code:'', version:'', previous_version:'', product_type:'文档', status:'有效' };
+      this.modal = 'product';
+    },
+    async saveProduct() {
+      if (this.form.id) {
+        await this.api('PUT', `/api/products/${this.form.id}`, this.form);
+      } else {
+        await this.api('POST', `/api/projects/${this.currentProjectId}/products`, this.form);
+      }
+      await this.loadProducts();
+      this.modal = '';
+    },
+    async deleteProduct(id) {
+      if (!confirm('确定删除此产品？')) return;
+      await this.api('DELETE', `/api/products/${id}`);
+      await this.loadProducts();
+    },
+
+    // ── 基线 ──
+    openBaselineModal(bl) {
+      this.form = bl
+        ? { ...bl, product_ids: bl.products.map(p => p.id) }
+        : { name:'', code:'', version:'', previous_version:'', release_date:'', status:'有效', product_ids:[] };
+      this.modal = 'baseline';
+    },
+    async saveBaseline() {
+      let bl;
+      const base = { name:this.form.name, code:this.form.code, version:this.form.version,
+                      previous_version:this.form.previous_version||null,
+                      release_date:this.form.release_date||null, status:this.form.status };
+      if (this.form.id) {
+        bl = await this.api('PUT', `/api/baselines/${this.form.id}`, base);
+        // sync products: remove all then re-add
+        for (const bp of (bl.products || [])) {
+          await this.api('DELETE', `/api/baselines/${bl.id}/products/${bp.id}`);
+        }
+      } else {
+        bl = await this.api('POST', `/api/projects/${this.currentProjectId}/baselines`, base);
+      }
+      for (let i = 0; i < this.form.product_ids.length; i++) {
+        await this.api('POST', `/api/baselines/${bl.id}/products`,
+          { product_id: Number(this.form.product_ids[i]), sort_order: i });
+      }
+      await this.loadBaselines();
+      this.modal = '';
+    },
+    async deleteBaseline(id) {
+      if (!confirm('确定删除此基线？')) return;
+      await this.api('DELETE', `/api/baselines/${id}`);
+      await this.loadBaselines();
+    },
+
+    // ── 导入/导出 ──
+    async onImportFile(evt) {
+      const file = evt.target.files[0];
+      if (!file) return;
+      evt.target.value = '';
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch('/api/import/parse', { method: 'POST', body: fd });
+      if (!r.ok) { const e = await r.json().catch(()=>({})); alert(e.detail || '解析失败'); return; }
+      const data = await r.json();
+      const s = data.summary;
+      this.importSummary = `项目"${data.project.name}"，${s.phases}个阶段，${s.activities}个活动，${s.products}个配置项，${s.baselines}条基线`;
+      this.importCheckin = data.needs_checkin;
+      this.importCheckout = data.needs_checkout;
+      this.importBaseline = data.needs_baseline;
+      this.importBaselineNames = data.baseline_names;
+      // 初始化默认值
+      this.importReasons = { checkin: {}, checkout: {} };
+      this.importBaselineSelections = {};
+      for (const item of data.needs_checkin) this.importReasons.checkin[item.key] = '入受控库';
+      for (const item of data.needs_checkout) this.importReasons.checkout[item.key] = '';
+      for (const item of data.needs_baseline) this.importBaselineSelections[item.key] = item.auto_matched || '';
+      this.modal = 'import';
+    },
+    async confirmImport() {
+      const r = await fetch('/api/import/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ checkin_reasons: this.importReasons.checkin, checkout_reasons: this.importReasons.checkout, baseline_selections: this.importBaselineSelections }),
+      });
+      if (!r.ok) { const e = await r.json().catch(()=>({})); alert(e.detail || '导入失败'); return; }
+      const res = await r.json();
+      this.modal = '';
+      alert(`导入成功！项目"${res.project}"，${res.phases}个阶段，${res.activities}个活动，${res.products}个配置项，${res.baselines}条基线`);
+      await this.loadProjects();
+      // 自动选中导入的项目
+      if (this.projects.length) {
+        this.currentProjectId = String(this.projects[0].id);
+        await this.onProjectChange();
+      }
+    },
+    exportExcel() {
+      window.open('/api/export', '_blank');
+    },
+
+    // ── 文档 ──
+    async generateOne(docId) {
+      await this.api('POST', `/api/documents/${docId}/generate`);
+      await this.loadDocuments();
+    },
+    async generateAll() {
+      await this.api('POST', `/api/projects/${this.currentProjectId}/generate-all`);
+      await this.loadDocuments();
+    },
+    downloadAll() {
+      window.open(`/api/projects/${this.currentProjectId}/download-all`, '_blank');
+    },
+    downloadDoc(docId) {
+      window.open(`/api/documents/${docId}/download`, '_blank');
+    },
+  };
+}
+</script>
+</body>
+</html>
