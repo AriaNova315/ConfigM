@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import TEMPLATES_DIR, GENERATED_DIR
+from app.core.output_paths import document_path, save_document
 from app.models.models import (
     Activity, ActivityProduct, ActivityType, Baseline, BaselineProduct,
     DocumentRecord, Phase, Product, Project,
@@ -443,16 +444,13 @@ async def generate_document(
     )
     phase_ids = [row[0] for row in phase_rows.all()]
     phase_seq = phase_ids.index(activity.phase_id) + 1 if activity.phase_id in phase_ids else 0
-    safe_phase = (phase.name if phase else "未知阶段").replace("/", "_")
-    phase_folder = f"{phase_seq:02d}-{safe_phase}"
-
-    proj_folder = f"{proj.name}ZDPX{proj.code}".replace("/", "_")
-    out_dir = GEN_DIR / proj_folder / phase_folder
-    out_dir.mkdir(parents=True, exist_ok=True)
     date_tag = (activity.activity_date or "").replace("-", "")
-    safe_name = dr.doc_number.replace("/", "_")
-    out_path = out_dir / f"{safe_name}({date_tag}).docx"
-    tpl.save(str(out_path))
+    out_path = document_path(
+        GEN_DIR, f"{proj.name}ZDPX{proj.code}",
+        f"{phase_seq:02d}-{phase.name if phase else '未知阶段'}",
+        f"{dr.doc_number}({date_tag})", proj.id, activity.phase_id, dr.id,
+    )
+    save_document(tpl, out_path)
 
     dr.file_path = str(out_path)
     dr.generated_at = datetime.utcnow().isoformat()

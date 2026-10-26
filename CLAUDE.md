@@ -11,9 +11,11 @@ ConfigM：配置管理记录自动生成系统。CM专员录入项目信息，�
 - **模板字段确认（两轮）**：
   - `/Users/gaoyiman/Desktop/Code/5000B/ConfigM/模版确认事项说明.md`
   - `/Users/gaoyiman/Desktop/Code/5000B/ConfigM/模版字段二轮说明.md`
-- **原始Word模板**：`/Users/gaoyiman/Desktop/Code/5000B/ConfigM/templates/`（7个文件）
+- **原始Word模板**：`templates/`（7个文件）；运行模板为 `templates/tpl/`（7个文件）
+- **当前部署说明**：`README.md`、`docs/WINDOWS_OFFLINE_DEPLOYMENT.md`、`docs/DELIVERY.md`
+- **当前验证状态**：`docs/VALIDATION.md`；外部历史设计文档只作背景，部署无需这些开发机路径。
 
-### 当前阶段（更新于 2026-05-29）
+### 当前阶段（更新于 2026-10-26）
 **已完成：**
 - ✅ docxtpl 动态增行 POC 验证通过
 - ✅ 7个Word模板字段两轮确认完毕
@@ -28,12 +30,12 @@ ConfigM：配置管理记录自动生成系统。CM专员录入项目信息，�
 - ✅ 模板占位符修复（ZDPX前缀、代码+版本空格、基线标识、审核项"不适用"等）
 
 **关键文件：**
-- `build_templates.py`：占位符注入脚本（可重跑重新生成）
+- `build_templates.py`：占位符注入维护脚本；当前运行模板有人工修正，部署和启动不得重跑覆盖
 - `templates/tpl/`：7个 `*_tpl.docx` 模板文件（已修正占位符）
 - `app/services/generator.py`：文档生成逻辑，含 AUDIT_RULES 审核规则表
 - `app/services/sequence.py`：流水号引擎，格式 `ZDPX-{code}/{version}-配置管理-{label}-{seq:03d}`
 - `app/static/templates/index.html`：前端单页应用
-- `run.py`：启动入口，用 `python3 run.py` 启动（使用系统Python，不用venv）
+- `run.py`：跨平台启动入口，推荐虚拟环境 Python；单机 127.0.0.1:8000、单进程、关闭 reload
 
 **已修复的模板问题（直接修改 tpl/*.docx XML）：**
 - 模版01/02：配置项标识和版本之间加空格（`{{ item.code }} {{ item.version }}`）
@@ -43,8 +45,11 @@ ConfigM：配置管理记录自动生成系统。CM专员录入项目信息，�
 - 所有模板：`ZDPX-{{ project.code }}` → `ZDPX{{ project.code }}`（项目代号表格内不带连字符）
 
 **已知规则（新会话必知）：**
-- 服务用系统Python启动：`python3 run.py`（venv目录存在但为空，可忽略）
-- 生成文件路径：`generated/{project_id}/{safe_doc_number}.docx`（`/` 替换为 `_`）
+- Mac 可继续用已有 `venv/bin/python run.py`；系统 Python 已装依赖时 `python3 run.py` 仍可用。Windows 用 `start.cmd` 和 `.venv`。
+- 常规 CPython 3.14；Mac 安装用 `requirements.txt`，Windows 离线安装用 `requirements-win.lock.txt`。
+- 新输出路径由 `app/core/output_paths.py` 处理：可读名称附项目/阶段/文档 ID，Windows 安全字符和保守长度预算。原有文件/业务字段不改名、不迁移。
+- 首页 Alpine.js 随代码本地交付；默认 docs/redoc 关闭。Word/Excel 不是后台服务依赖，公式重算与查看另见部署手册。
+- 不启动真实应用做测试：`python -m unittest discover -s tests -v` 会创建干净临时副本并只使用合成数据。
 - 产品级配置审核：`cm_manager` = `f"{proj.cm_manager}、{proj.leader}"`；阶段级只用 `proj.cm_manager`
 - AUDIT_RULES：所有非"是"项均为"不适用"（不是"否"）
 
@@ -53,9 +58,9 @@ ConfigM：配置管理记录自动生成系统。CM专员录入项目信息，�
 - "产品管理" Tab → 改为"配置项管理"
 - "产品结构表" Sheet → 用户已改为"配置项清单"
 
-**下一步：Excel 导入/导出功能**
+**历史 Excel 导入/导出需求（已于 2026-05-29 实现）**
 
-待实现功能（等用户提供更新后的 Excel 文件后开始编码）：
+以下为已实现的业务规则，部署适配不改变：
 
 *导入流程：*
 1. 上传 Excel → 清空数据库 → 重新导入
@@ -79,14 +84,21 @@ ConfigM：配置管理记录自动生成系统。CM专员录入项目信息，�
 *导出流程：*
 - 从数据库读取所有数据，按同样 Sheet 结构写出 Excel 文件（可再次导入）
 
-*Excel 文件位置：* `profiles/工作簿1.xlsx`
+*当前交付空白输入模板：* `resources/ConfigM导入模板.xlsx`。profiles/ 是本机业务输入，不能提交或交付。
 
 **Excel 导入/导出已实现（2026-05-29）：**
 - `app/services/importer.py`：解析 + 导入 + 导出逻辑
 - `app/api/routes/importer.py`：POST /api/import/parse、POST /api/import/confirm、GET /api/export
 - 前端：header 加"导入 Excel"/"导出 Excel"按钮，导入后弹确认 Modal
-- 依赖：`python-multipart`（已用 `pip3 install python-multipart --break-system-packages` 安装至系统 Python）
+- 依赖：`python-multipart`，现已纳入固定依赖；不再要求修改系统 Python。
 - Tab"产品管理"已改为"配置项管理"
+
+**Windows 离线交付适配（2026-10-26）：**
+- ✅ 固定依赖、本地 Alpine.js、单机启动入口、start.cmd、安全输出路径和原子保存。
+- ✅ 空白四 Sheet Excel 模板、交付白名单打包脚本、部署/验证文档。
+- ✅ Mac 干净副本初始化、Excel 流程、七类文档和路径回归测试。
+- 待验收：Windows 实机断网安装、start.cmd、真实 Word 占用与 Office 版式；状态以 docs/VALIDATION.md 为准。
+- 本机 configm.db、profiles、generated 历史数据不能随包带出；导入确认会替换所有项目业务表，导出只取第一个项目，不能代替完整备份。
 
 ### 会话开始时的操作
 1. 读取工程实现规范文档（上方路径）

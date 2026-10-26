@@ -32,8 +32,11 @@ __pycache__/
 *.bak
 /wheelhouse/
 /.prepare-venv/
+/artifacts/
+/.gstack/
 
 # OS metadata and Office lock files
 .DS_Store
 Thumbs.db
 ~$*
+.gstack/
